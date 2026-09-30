@@ -313,27 +313,30 @@ MASTER DIRECTION – INFORMATION TECHNOLOGY GOVERNANCE, RISK, CONTROLS AND ASSUR
     },
   });
 
-  // Link citations for doc1
-  await prisma.sourceCitation.createMany({
-    data: [
-      {
-        regulatoryDocumentId: doc1.id,
-        sectionReference: 'Section 2.3',
-        pageNumber: 1,
-        paragraphText: 'The Chief Information Security Officer (CISO) shall be an independent senior management officer who shall report directly to the Executive Director or the Board Risk Committee without operational reporting to the CIO.',
-        textStartOffset: 574,
-        textEndOffset: 808,
-      },
-      {
-        regulatoryDocumentId: doc1.id,
-        sectionReference: 'Section 3.3',
-        pageNumber: 1,
-        paragraphText: 'Critical cyber incidents shall be notified to the RBI Cyber Security and IT Risk Cell within 6 hours of detection, with a comprehensive root cause analysis (RCA) submitted within 21 calendar days.',
-        textStartOffset: 1045,
-        textEndOffset: 1241,
-      },
-    ],
-  });
+  // Link citations for doc1 if not already present
+  const existingCitations = await prisma.sourceCitation.count({ where: { regulatoryDocumentId: doc1.id } });
+  if (existingCitations === 0) {
+    await prisma.sourceCitation.createMany({
+      data: [
+        {
+          regulatoryDocumentId: doc1.id,
+          sectionReference: 'Section 2.3',
+          pageNumber: 1,
+          paragraphText: 'The Chief Information Security Officer (CISO) shall be an independent senior management officer who shall report directly to the Executive Director or the Board Risk Committee without operational reporting to the CIO.',
+          textStartOffset: 574,
+          textEndOffset: 808,
+        },
+        {
+          regulatoryDocumentId: doc1.id,
+          sectionReference: 'Section 3.3',
+          pageNumber: 1,
+          paragraphText: 'Critical cyber incidents shall be notified to the RBI Cyber Security and IT Risk Cell within 6 hours of detection, with a comprehensive root cause analysis (RCA) submitted within 21 calendar days.',
+          textStartOffset: 1045,
+          textEndOffset: 1241,
+        },
+      ],
+    });
+  }
 
   // Link topics for doc1
   for (const tName of ['IT Governance', 'Cybersecurity', 'Cloud', 'Third-Party Risk', 'Incident Reporting']) {
@@ -931,91 +934,114 @@ This advisory regarding legacy FIX trading protocols has been formally withdrawn
   // 6. Seed User Watchlist & Bookmarks for Verification
   const analystId = usersMap['analyst@bank.in'];
   if (analystId) {
-    await prisma.watchlist.create({
-      data: {
-        userId: analystId,
-        name: 'Banking Technology & Cybersecurity Watchlist',
-        regulatorFilters: JSON.stringify(['RBI', 'CERT-In']),
-        topicFilters: JSON.stringify(['Cybersecurity', 'Cloud', 'Incident Reporting', 'IT Governance']),
-        entityTypeFilters: JSON.stringify(['Scheduled Commercial Banks', 'Payment System Operators']),
-        frequency: 'DAILY',
-        active: true,
-      },
+    const existingWatchlist = await prisma.watchlist.findFirst({
+      where: { userId: analystId, name: 'Banking Technology & Cybersecurity Watchlist' },
     });
+    if (!existingWatchlist) {
+      await prisma.watchlist.create({
+        data: {
+          userId: analystId,
+          name: 'Banking Technology & Cybersecurity Watchlist',
+          regulatorFilters: JSON.stringify(['RBI', 'CERT-In']),
+          topicFilters: JSON.stringify(['Cybersecurity', 'Cloud', 'Incident Reporting', 'IT Governance']),
+          entityTypeFilters: JSON.stringify(['Scheduled Commercial Banks', 'Payment System Operators']),
+          frequency: 'DAILY',
+          active: true,
+        },
+      });
+    }
 
-    await prisma.bookmark.create({
-      data: {
+    await prisma.bookmark.upsert({
+      where: {
+        userId_regulatoryDocumentId: {
+          userId: analystId,
+          regulatoryDocumentId: doc1.id,
+        },
+      },
+      update: {},
+      create: {
         userId: analystId,
         regulatoryDocumentId: doc1.id,
       },
     });
 
-    await prisma.savedSearch.create({
-      data: {
-        userId: analystId,
-        name: 'Cloud and Incident Reporting Directions',
-        query: 'incident reporting 6 hours cloud data',
-        filters: JSON.stringify({ regulators: ['RBI', 'CERT-In'], topics: ['Incident Reporting', 'Cloud'] }),
-      },
+    const existingSearch = await prisma.savedSearch.findFirst({
+      where: { userId: analystId, name: 'Cloud and Incident Reporting Directions' },
     });
-  }
-
-  // 7. Seed Initial Ingestion Jobs for Telemetry
-  for (const c of connectorsData) {
-    const connId = connectorsMap[c.sourceName];
-    if (connId) {
-      await prisma.ingestionJob.create({
+    if (!existingSearch) {
+      await prisma.savedSearch.create({
         data: {
-          sourceConnectorId: connId,
-          jobType: 'POLL',
-          status: 'COMPLETED',
-          completedAt: new Date(),
-          documentsFound: 12,
-          documentsCreated: 3,
-          documentsUpdated: 0,
-          retryCount: 0,
+          userId: analystId,
+          name: 'Cloud and Incident Reporting Directions',
+          query: 'incident reporting 6 hours cloud data',
+          filters: JSON.stringify({ regulators: ['RBI', 'CERT-In'], topics: ['Incident Reporting', 'Cloud'] }),
         },
       });
     }
   }
 
-  // Add one failed job for Admin dashboard testing
-  const npciConnId = connectorsMap['NPCI UPI & Payment Security Circulars'];
-  if (npciConnId) {
-    await prisma.ingestionJob.create({
-      data: {
-        sourceConnectorId: npciConnId,
-        jobType: 'POLL',
-        status: 'FAILED',
-        completedAt: new Date(),
-        documentsFound: 0,
-        documentsCreated: 0,
-        documentsUpdated: 0,
-        retryCount: 3,
-        errorMessage: 'ETIMEDOUT: Connection to remote portal timed out after 30000ms. Retry threshold exceeded.',
-      },
-    });
+  // 7. Seed Initial Ingestion Jobs for Telemetry if empty
+  const existingJobCount = await prisma.ingestionJob.count();
+  if (existingJobCount === 0) {
+    for (const c of connectorsData) {
+      const connId = connectorsMap[c.sourceName];
+      if (connId) {
+        await prisma.ingestionJob.create({
+          data: {
+            sourceConnectorId: connId,
+            jobType: 'POLL',
+            status: 'COMPLETED',
+            completedAt: new Date(),
+            documentsFound: 12,
+            documentsCreated: 3,
+            documentsUpdated: 0,
+            retryCount: 0,
+          },
+        });
+      }
+    }
+
+    // Add one failed job for Admin dashboard testing
+    const npciConnId = connectorsMap['NPCI UPI & Payment Security Circulars'];
+    if (npciConnId) {
+      await prisma.ingestionJob.create({
+        data: {
+          sourceConnectorId: npciConnId,
+          jobType: 'POLL',
+          status: 'FAILED',
+          completedAt: new Date(),
+          documentsFound: 0,
+          documentsCreated: 0,
+          documentsUpdated: 0,
+          retryCount: 3,
+          errorMessage: 'ETIMEDOUT: Connection to remote portal timed out after 30000ms. Retry threshold exceeded.',
+        },
+      });
+    }
   }
 
-  // 8. Seed Audit Log entries
-  await prisma.auditLog.createMany({
-    data: [
-      {
-        userId: usersMap['admin@regintel.in'],
-        action: 'SYSTEM_INITIALIZATION',
-        resourceType: 'System',
-        resourceId: 'INIT-001',
-        details: JSON.stringify({ message: 'Regulatory Intelligence Hub India initialized with 5 regulators and 12 topics.' }),
-      },
-      {
-        userId: usersMap['reviewer@finreg.gov.in'],
-        action: 'REVIEW_APPROVE',
-        resourceType: 'RegulatoryDocument',
-        resourceId: doc1.id,
-        details: JSON.stringify({ previousStatus: 'AI_GENERATED', newStatus: 'HUMAN_REVIEWED', notes: 'Approved after verifying citations.' }),
-      },
-    ],
-  });
+  // 8. Seed Audit Log entries if empty
+  const existingAuditCount = await prisma.auditLog.count();
+  if (existingAuditCount === 0) {
+    await prisma.auditLog.createMany({
+      data: [
+        {
+          userId: usersMap['admin@regintel.in'],
+          action: 'SYSTEM_INITIALIZATION',
+          resourceType: 'System',
+          resourceId: 'INIT-001',
+          details: JSON.stringify({ message: 'Regulatory Intelligence Hub India initialized with 5 regulators and 12 topics.' }),
+        },
+        {
+          userId: usersMap['reviewer@finreg.gov.in'],
+          action: 'REVIEW_APPROVE',
+          resourceType: 'RegulatoryDocument',
+          resourceId: doc1.id,
+          details: JSON.stringify({ previousStatus: 'AI_GENERATED', newStatus: 'HUMAN_REVIEWED', notes: 'Approved after verifying citations.' }),
+        },
+      ],
+    });
+  }
 
   console.log('✓ Seeding complete with high fidelity test records!');
 }
