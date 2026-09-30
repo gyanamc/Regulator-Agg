@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "Production-grade Regulatory Intelligence and Compliance Research Platform for Indian Regulators",
+  "engines": {
+    "node": ">=20.18.1"
+  },
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "prisma generate && next build",
