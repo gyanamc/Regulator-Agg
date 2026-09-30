@@ -1,0 +1,236 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Regulator {
+  id               String            @id @default(cuid())
+  name             String
+  shortName        String            @unique
+  officialWebsite  String
+  description      String
+  jurisdiction     String            @default("India")
+  active           Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  sourceConnectors SourceConnector[]
+  documents        RegulatoryDocument[]
+}
+
+model SourceConnector {
+  id                    String              @id @default(cuid())
+  regulatorId           String
+  regulator             Regulator           @relation(fields: [regulatorId], references: [id], onDelete: Cascade)
+  sourceName            String
+  sourceUrl             String
+  sourceType            String              // RSS, HTML_TABLE, API, MANUAL
+  checkFrequency        String              @default("DAILY") // HOURLY, DAILY, REALTIME
+  lastCheckedAt         DateTime?
+  lastSuccessfulCheckAt DateTime?
+  active                Boolean             @default(true)
+  status                String              @default("HEALTHY") // HEALTHY, DEGRADED, ERROR
+  errorMessage          String?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  documents             RegulatoryDocument[]
+  ingestionJobs         IngestionJob[]
+}
+
+model RegulatoryDocument {
+  id                   String              @id @default(cuid())
+  regulatorId          String
+  regulator            Regulator           @relation(fields: [regulatorId], references: [id], onDelete: Restrict)
+  sourceConnectorId    String?
+  sourceConnector      SourceConnector?    @relation(fields: [sourceConnectorId], references: [id], onDelete: SetNull)
+  title                String
+  documentNumber       String?
+  documentType         String              // MASTER_DIRECTION, CIRCULAR, ADVISORY, NOTIFICATION, GUIDELINE, ORDER
+  publicationDate      DateTime
+  effectiveDate        DateTime?
+  officialSourceUrl    String
+  originalFileUrl      String?
+  originalFileHash     String?
+  extractedText        String?
+  extractionStatus     String              @default("PENDING") // PENDING, EXTRACTED, PARTIAL, FAILED
+  ingestionStatus      String              @default("PROCESSED") // DISCOVERED, DOWNLOADED, PROCESSED
+  currentStatus        String              @default("NEW") // NEW, CURRENT, AMENDED, SUPERSEDED, WITHDRAWN, UNKNOWN
+  verificationStatus   String              @default("AI_GENERATED") // AI_GENERATED, PENDING_REVIEW, HUMAN_REVIEWED, VERIFIED, REJECTED
+  
+  supersedesDocumentId String?
+  supersedesDocument   RegulatoryDocument? @relation("SupersededRelation", fields: [supersedesDocumentId], references: [id], onDelete: SetNull)
+  supersededBy         RegulatoryDocument[] @relation("SupersededRelation")
+
+  amendedDocumentId    String?
+  amendedDocument      RegulatoryDocument? @relation("AmendedRelation", fields: [amendedDocumentId], references: [id], onDelete: SetNull)
+  amendedBy            RegulatoryDocument[] @relation("AmendedRelation")
+
+  withdrawnDate        DateTime?
+  isDemo               Boolean             @default(false)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  summary              RegulatorySummary?
+  documentTopics       DocumentTopic[]
+  citations            SourceCitation[]
+  bookmarks            Bookmark[]
+}
+
+model RegulatorySummary {
+  id                      String             @id @default(cuid())
+  regulatoryDocumentId    String             @unique
+  regulatoryDocument      RegulatoryDocument @relation(fields: [regulatoryDocumentId], references: [id], onDelete: Cascade)
+  shortHeadline           String
+  executiveSummary        String
+  purpose                 String
+  affectedEntities        String             // JSON Array string
+  keyRequirements         String             // JSON Array string
+  advisoryRecommendations String             // JSON Array string
+  importantDates          String             // JSON Array string
+  cybersecurityImpact     String             // JSON Array string
+  technologyImpact        String             // JSON Array string
+  operationalImpact       String             // JSON Array string
+  suggestedConsiderations String             // JSON Array string
+  limitations             String             // JSON Array string
+  confidence              String             @default("HIGH") // HIGH, MEDIUM, LOW
+  modelName               String             @default("local-rule-grounded")
+  promptVersion           String             @default("v1.0.0")
+  generatedAt             DateTime           @default(now())
+  reviewedBy              String?
+  reviewedAt              DateTime?
+  reviewStatus            String             @default("PENDING") // PENDING, APPROVED, REJECTED
+  reviewerNotes           String?
+  citations               SourceCitation[]
+}
+
+model Topic {
+  id             String          @id @default(cuid())
+  name           String          @unique
+  description    String
+  documentTopics DocumentTopic[]
+}
+
+model DocumentTopic {
+  id                   String             @id @default(cuid())
+  regulatoryDocumentId String
+  regulatoryDocument   RegulatoryDocument @relation(fields: [regulatoryDocumentId], references: [id], onDelete: Cascade)
+  topicId              String
+  topic                Topic              @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  relevanceScore       Float              @default(1.0)
+
+  @@unique([regulatoryDocumentId, topicId])
+}
+
+model SourceCitation {
+  id                   String             @id @default(cuid())
+  regulatoryDocumentId String
+  regulatoryDocument   RegulatoryDocument @relation(fields: [regulatoryDocumentId], references: [id], onDelete: Cascade)
+  regulatorySummaryId  String?
+  regulatorySummary    RegulatorySummary? @relation(fields: [regulatorySummaryId], references: [id], onDelete: SetNull)
+  sectionReference     String
+  pageNumber           Int?
+  paragraphText        String
+  textStartOffset      Int?
+  textEndOffset        Int?
+  createdAt            DateTime           @default(now())
+}
+
+model User {
+  id            String             @id @default(cuid())
+  name          String
+  email         String             @unique
+  role          String             @default("REGISTERED_USER") // VISITOR, REGISTERED_USER, REVIEWER, ADMINISTRATOR
+  organisation  String?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  watchlists    Watchlist[]
+  savedSearches SavedSearch[]
+  bookmarks     Bookmark[]
+  conversations ChatConversation[]
+  auditLogs     AuditLog[]
+}
+
+model Watchlist {
+  id                 String   @id @default(cuid())
+  userId             String
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name               String
+  regulatorFilters   String   // JSON array of shortNames
+  topicFilters       String   // JSON array of topic names
+  entityTypeFilters  String   // JSON array of entity types
+  frequency          String   @default("DAILY") // DAILY, WEEKLY
+  active             Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model SavedSearch {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  query     String
+  filters   String   // JSON string of active filters
+  createdAt DateTime @default(now())
+}
+
+model Bookmark {
+  id                   String             @id @default(cuid())
+  userId               String
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  regulatoryDocumentId String
+  regulatoryDocument   RegulatoryDocument @relation(fields: [regulatoryDocumentId], references: [id], onDelete: Cascade)
+  createdAt            DateTime           @default(now())
+
+  @@unique([userId, regulatoryDocumentId])
+}
+
+model ChatConversation {
+  id         String        @id @default(cuid())
+  userId     String?
+  user       User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  title      String
+  documentId String?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  messages   ChatMessage[]
+}
+
+model ChatMessage {
+  id                String           @id @default(cuid())
+  conversationId    String
+  conversation      ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role              String           // user, assistant, system
+  content           String
+  retrievalMetadata String?          // JSON metadata with citations and match context
+  createdAt         DateTime         @default(now())
+}
+
+model IngestionJob {
+  id                String          @id @default(cuid())
+  sourceConnectorId String
+  sourceConnector   SourceConnector @relation(fields: [sourceConnectorId], references: [id], onDelete: Cascade)
+  jobType           String          @default("POLL") // POLL, MANUAL_UPLOAD, HEALTH_CHECK
+  status            String          @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  startedAt         DateTime        @default(now())
+  completedAt       DateTime?
+  documentsFound    Int             @default(0)
+  documentsCreated  Int             @default(0)
+  documentsUpdated  Int             @default(0)
+  retryCount        Int             @default(0)
+  errorMessage      String?
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action       String   // REVIEW_APPROVE, REVIEW_REJECT, MANUAL_INGEST, SYNC_CONNECTOR, etc.
+  resourceType String   // RegulatoryDocument, RegulatorySummary, SourceConnector, etc.
+  resourceId   String?
+  details      String?  // JSON string
+  createdAt    DateTime @default(now())
+}
