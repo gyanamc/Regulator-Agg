@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectorRegistry } from '@/lib/connectors/registry';
 import prisma from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(
   request: NextRequest,
   { params }: { params: { name: string } }
